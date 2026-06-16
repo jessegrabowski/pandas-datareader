@@ -35,7 +35,7 @@ class YahooActionReader(YahooDailyReader):
 
 
 def _get_one_action(data: DataFrame) -> DataFrame:
-    """Extract actions (dividends and splits) from a single-symbol DataFrame.
+    """Stack the dividend and split columns of a single-symbol frame into action/value rows.
 
     Parameters
     ----------
@@ -45,26 +45,18 @@ def _get_one_action(data: DataFrame) -> DataFrame:
     Returns
     -------
     df : DataFrame
+        Rows labelled ``'DIVIDEND'`` or ``'SPLIT'`` with their value, newest first.
     """
-    actions = DataFrame(columns=["action", "value"])
+    frames = []
+    for column, label in (("Dividends", "DIVIDEND"), ("Splits", "SPLIT")):
+        if column in data.columns:
+            events = data[[column]].dropna().rename(columns={column: "value"})
+            events["action"] = label
+            frames.append(events)
 
-    if "Dividends" in data.columns:
-        # Add a label column so we can combine our two DFs
-        dividends = DataFrame(data["Dividends"]).dropna()
-        dividends["action"] = "DIVIDEND"
-        dividends = dividends.rename(columns={"Dividends": "value"})
-        actions = pd.concat([actions, dividends], sort=True, axis=1)
-        actions = actions.sort_index(ascending=False)
-
-    if "Splits" in data.columns:
-        # Add a label column so we can combine our two DFs
-        splits = DataFrame(data["Splits"]).dropna()
-        splits["action"] = "SPLIT"
-        splits = splits.rename(columns={"Splits": "value"})
-        actions = pd.concat([actions, splits], sort=True, axis=1)
-        actions = actions.sort_index(ascending=False)
-
-    return actions
+    if not frames:
+        return DataFrame(columns=["action", "value"])
+    return pd.concat(frames).sort_index(ascending=False)[["action", "value"]]
 
 
 class YahooDivReader(YahooActionReader):
