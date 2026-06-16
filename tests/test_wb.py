@@ -18,6 +18,20 @@ pytestmark = pytest.mark.stable
 
 
 class TestWB:
+    def test_indicators_are_paced(self, monkeypatch):
+        # One pause between consecutive indicator requests, none before the first.
+        sleeps = []
+        monkeypatch.setattr("pandas_datareader.wb.time.sleep", sleeps.append)
+        monkeypatch.setattr(
+            WorldBankReader,
+            "_read_one_data",
+            lambda self, url, params: pd.DataFrame(
+                [["US", "USA", "2010", 1.0]], columns=["country", "iso_code", "year", "x"]
+            ),
+        )
+        WorldBankReader(symbols=["A", "B", "C"], countries="US")._read()
+        assert len(sleeps) == 2
+
     def test_wdi_search(self):
         # Test that a name column exists, and that some results were returned
         # ...without being too strict about what the actual contents of the
