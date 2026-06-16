@@ -1,4 +1,5 @@
 from functools import reduce
+import time
 import warnings
 
 import numpy as np
@@ -649,7 +650,10 @@ class WorldBankReader(_BaseReader):
 
     def _read(self) -> pd.DataFrame:
         data = []
-        for indicator in self.symbols:
+        for i, indicator in enumerate(self.symbols):
+            if i:
+                # Space out requests so a batch of indicators doesn't slam the API.
+                time.sleep(self.pause)
             # Build URL for api call
             try:
                 df = self._read_one_data(self.url + indicator, self.params)
