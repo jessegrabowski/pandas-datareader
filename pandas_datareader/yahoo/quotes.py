@@ -1,8 +1,6 @@
-from collections import OrderedDict
-import json
-
 from pandas import DataFrame
 
+from pandas_datareader._utils import RemoteDataError
 from pandas_datareader.base import _BaseReader
 from pandas_datareader.yahoo.headers import DEFAULT_HEADERS
 
@@ -11,6 +9,8 @@ _DEFAULT_PARAMS = {
     "corsDomain": "finance.yahoo.com",
     ".tsrc": "finance",
 }
+_CRUMB_URL = "https://query1.finance.yahoo.com/v1/test/getcrumb"
+_COOKIE_URL = "https://fc.yahoo.com"
 
 
 class YahooQuotesReader(_BaseReader):
@@ -33,10 +33,7 @@ class YahooQuotesReader(_BaseReader):
             pause=pause,
             session=session,
         )
-        if session is not None:
-            self.headers = session.headers
-        else:
-            self.headers = DEFAULT_HEADERS
+        self.headers = session.headers if session is not None else DEFAULT_HEADERS
 
     @property
     def url(self) -> str:
@@ -49,44 +46,24 @@ class YahooQuotesReader(_BaseReader):
         Returns
         -------
         df : DataFrame
+            One row per symbol, indexed by ticker.
         """
-        if isinstance(self.symbols, str):
-            return self._read_one_data(self.url, self.params(self.symbols))
-        else:
-            data = OrderedDict()
-            for symbol in self.symbols:
-                data[symbol] = self._read_one_data(self.url, self.params(symbol)).loc[symbol]
-            return DataFrame.from_dict(data, orient="index")
+        symbols = [self.symbols] if isinstance(self.symbols, str) else list(self.symbols)
+        params = {"symbols": ",".join(symbols), "crumb": self._get_crumb(), **_DEFAULT_PARAMS}
+        results = self._get_response(self.url, params=params, headers=self.headers).json()
+        results = results["quoteResponse"]["result"]
+        if not results:
+            raise RemoteDataError(f"No quotes fetched for {symbols}")
 
-    def params(self, symbol: str) -> dict:
-        """Parameters to use in API calls.
+        df = DataFrame(results).set_index("symbol")
+        df["price"] = df["regularMarketPrice"]
+        return df
 
-        Parameters
-        ----------
-        symbol : str
-            Ticker symbol.
+    def _get_crumb(self, *args) -> str:
+        """Prime the session cookie and return a Yahoo API crumb.
 
-        Returns
-        -------
-        result : dict
+        The v7 quote endpoint rejects requests without a cookie/crumb pair. Fetch a cookie from
+        Yahoo, then exchange it for a crumb that authorizes the quote request.
         """
-        params = {"symbols": symbol}
-        params.update(_DEFAULT_PARAMS)
-        return params
-
-    def _read_lines(self, out) -> DataFrame:
-        """Parse Yahoo Finance JSON response.
-
-        Parameters
-        ----------
-        out : file-like
-            Raw response content.
-
-        Returns
-        -------
-        df : DataFrame
-        """
-        data = json.loads(out.read())["quoteResponse"]["result"][0]
-        idx = data.pop("symbol")
-        data["price"] = data["regularMarketPrice"]
-        return DataFrame(data, index=[idx])
+        self.session.get(_COOKIE_URL, headers=self.headers, timeout=self.timeout)
+        return self.session.get(_CRUMB_URL, headers=self.headers, timeout=self.timeout).text

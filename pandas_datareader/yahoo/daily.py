@@ -1,10 +1,7 @@
-import json
-import re
 import time
 
-from pandas import DataFrame, date_range, isnull, notnull, to_datetime
+from pandas import DataFrame, Series, date_range, isnull, notnull, to_datetime
 
-from pandas_datareader._utils import RemoteDataError
 from pandas_datareader.base import _DailyBaseReader
 from pandas_datareader.yahoo.headers import DEFAULT_HEADERS
 
@@ -104,112 +101,84 @@ class YahooDailyReader(_DailyBaseReader):
     @property
     def url(self) -> str:
         """API URL."""
-        return "https://finance.yahoo.com/quote/{}/history"
+        return "https://query1.finance.yahoo.com/v8/finance/chart/{}"
 
-    # Test test_get_data_interval() crashed because of this issue, probably
-    # whole yahoo part of package wasn't
-    # working properly
     def _get_params(self, symbol):
-        # This needed because yahoo returns data shifted by 4 hours ago.
-        four_hours_in_seconds = 14400
-        unix_start = int(time.mktime(self.start.timetuple()))
-        unix_start += four_hours_in_seconds
         day_end = self.end.replace(hour=23, minute=59, second=59)
-        unix_end = int(time.mktime(day_end.timetuple()))
-        unix_end += four_hours_in_seconds
-
-        params = {
-            "period1": unix_start,
-            "period2": unix_end,
+        return {
+            "period1": int(time.mktime(self.start.timetuple())),
+            "period2": int(time.mktime(day_end.timetuple())),
             "interval": self.interval,
-            "frequency": self.interval,
-            "filter": "history",
+            "events": "div,splits",
+            "includeAdjustedClose": "true",
             "symbol": symbol,
         }
-        return params
 
     def _read_one_data(self, url, params):
-        """read one data from specified symbol"""
+        """Read price history for a single symbol from the Yahoo v8 chart API."""
+        symbol = params.pop("symbol")
+        resp = self._get_response(url.format(symbol), params=params, headers=self.headers)
 
-        symbol = params["symbol"]
-        del params["symbol"]
-        url = url.format(symbol)
+        result = resp.json()["chart"]["result"]
+        if not result or "timestamp" not in result[0]:
+            return self._empty_history()
+        result = result[0]
 
-        resp = self._get_response(url, params=params, headers=self.headers)
-        ptrn = r"root\.App\.main = (.*?);\n}\(this\)\);"
-        try:
-            j = json.loads(re.search(ptrn, resp.text, re.DOTALL).group(1))
-            data = j["context"]["dispatcher"]["stores"]["HistoricalPriceStore"]
-        except KeyError as exc:
-            msg = "No data fetched for symbol {} using {}"
-            raise RemoteDataError(msg.format(symbol, self.__class__.__name__)) from exc
-
-        # price data
-        prices = DataFrame(data["prices"])
-        if len(prices) == 0:
-            freq = self.interval[1].upper()
-            if freq == "W":
-                freq += "-MON"
-            dates = date_range(self.start, self.end, freq=freq)
-            prices = DataFrame(
-                index=dates,
-                columns=["High", "Low", "Open", "Close", "Volume", "Adj Close"],
-            )
-            return prices
-
-        prices.columns = [col.capitalize() for col in prices.columns]
-        prices["Date"] = to_datetime(to_datetime(prices["Date"], unit="s").dt.date)
-
-        if "Data" in prices.columns:
-            prices = prices[prices["Data"].isnull()]
-        prices = prices[["Date", "High", "Low", "Open", "Close", "Volume", "Adjclose"]]
-        prices = prices.rename(columns={"Adjclose": "Adj Close"})
-
-        prices = prices.set_index("Date")
+        quote = result["indicators"]["quote"][0]
+        adjclose = result["indicators"].get("adjclose", [{}])[0].get("adjclose", quote["close"])
+        prices = DataFrame(
+            {
+                "High": quote["high"],
+                "Low": quote["low"],
+                "Open": quote["open"],
+                "Close": quote["close"],
+                "Volume": quote["volume"],
+                "Adj Close": adjclose,
+            },
+            index=to_datetime(to_datetime(Series(result["timestamp"]), unit="s").dt.date),
+        )
+        prices.index.name = "Date"
         prices = prices.sort_index().dropna(how="all")
 
         if self.ret_index:
             prices["Ret_Index"] = _calc_return_index(prices["Adj Close"])
         if self.adjust_price:
             prices = _adjust_prices(prices)
+        if self.get_actions:
+            prices = self._add_actions(prices, result.get("events", {}))
 
-        # dividends & splits data
-        if self.get_actions and data["eventsData"]:
-            actions = DataFrame(data["eventsData"])
-            actions.columns = [col.capitalize() for col in actions.columns]
-            actions["Date"] = to_datetime(to_datetime(actions["Date"], unit="s").dt.date)
+        return prices
 
-            types = actions["Type"].unique()
-            if "DIVIDEND" in types:
-                divs = actions[actions.Type == "DIVIDEND"].copy()
-                divs = divs[["Date", "Amount"]].reset_index(drop=True)
-                divs = divs.set_index("Date")
-                divs = divs.rename(columns={"Amount": "Dividends"})
-                prices = prices.join(divs, how="outer")
+    def _empty_history(self) -> DataFrame:
+        """Return an empty price frame spanning the requested date range."""
+        freq = self.interval[1].upper()
+        if freq == "W":
+            freq += "-MON"
+        dates = date_range(self.start, self.end, freq=freq)
+        return DataFrame(index=dates, columns=["High", "Low", "Open", "Close", "Volume", "Adj Close"])
 
-            if "SPLIT" in types:
+    def _add_actions(self, prices: DataFrame, events: dict) -> DataFrame:
+        """Join dividend and split columns onto the price frame from the chart ``events`` block."""
+        dividends = events.get("dividends", {})
+        splits = events.get("splits", {})
 
-                def split_ratio(row):
-                    if float(row["Numerator"]) > 0:
-                        if ":" in row["Splitratio"]:
-                            n, m = row["Splitratio"].split(":")
-                            return float(m) / float(n)
-                        else:
-                            return eval(row["Splitratio"])
-                    else:
-                        return 1
+        if dividends:
+            divs = DataFrame(list(dividends.values()))
+            divs.index = to_datetime(to_datetime(divs["date"], unit="s").dt.date)
+            prices = prices.join(divs["amount"].rename("Dividends"), how="outer")
 
-                splits = actions[actions.Type == "SPLIT"].copy()
-                splits["SplitRatio"] = splits.apply(split_ratio, axis=1)
-                splits = splits.reset_index(drop=True)
-                splits = splits.set_index("Date")
-                splits["Splits"] = splits["SplitRatio"]
-                prices = prices.join(splits["Splits"], how="outer")
+        if splits:
+            spl = DataFrame(list(splits.values()))
+            spl.index = to_datetime(to_datetime(spl["date"], unit="s").dt.date)
+            # The split column is denominator/numerator (e.g. 1/7 for a 7:1 split); a non-positive
+            # numerator denotes a symbol change rather than a real split.
+            ratio = (spl["denominator"] / spl["numerator"]).where(spl["numerator"] > 0, 1.0)
+            prices = prices.join(ratio.rename("Splits"), how="outer")
 
-                if "DIVIDEND" in types and not self.adjust_dividends:
-                    # dividends are adjusted automatically by Yahoo
-                    adj = prices["Splits"].sort_index(ascending=False).fillna(1).cumprod()
-                    prices["Dividends"] = prices["Dividends"] / adj
+            if dividends and not self.adjust_dividends:
+                # Yahoo reports split-adjusted dividends; undo the adjustment.
+                adj = prices["Splits"].sort_index(ascending=False).fillna(1).cumprod()
+                prices["Dividends"] = prices["Dividends"] / adj
 
         return prices
 
