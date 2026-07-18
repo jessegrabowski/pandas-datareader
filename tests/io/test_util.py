@@ -138,19 +138,53 @@ class TestParsePeriodCode:
         [
             ("2009", datetime(2009, 1, 1)),
             ("2009-03", datetime(2009, 3, 1)),
+            ("2009-3", datetime(2009, 3, 1)),
             ("2009-03-15", datetime(2009, 3, 15)),
             ("2009-Q1", datetime(2009, 1, 1)),
             ("2009-Q4", datetime(2009, 10, 1)),
             ("2009Q2", datetime(2009, 4, 1)),
             ("2013-S1", datetime(2013, 1, 1)),
             ("2013-S2", datetime(2013, 7, 1)),
+            ("2013-s2", datetime(2013, 7, 1)),
             ("2020-W01", datetime(2019, 12, 30)),
             ("2020-W53", datetime(2020, 12, 28)),
+            # Tolerated variants pandas parses to the correct period.
+            ("20090101", datetime(2009, 1, 1)),
+            ("2009/03", datetime(2009, 3, 1)),
+            ("2009-q1", datetime(2009, 1, 1)),
+            ("2009-01-15T00:00:00", datetime(2009, 1, 15)),
+            (" 2009 ", datetime(2009, 1, 1)),
+            # pandas 3 timestamps reach beyond the old nanosecond range.
+            ("1500", datetime(1500, 1, 1)),
+            ("2263", datetime(2263, 1, 1)),
+            ("9999-12-31", datetime(9999, 12, 31)),
         ],
     )
     def test_period_start_convention(self, code, expected):
         assert _parse_period_code(code) == expected
 
-    @pytest.mark.parametrize("code", ["FY2009/10", "2009-Q5", "2013-S3", "notadate", "20"])
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "FY2009/10",
+            "notadate",
+            "20",
+            "0000",
+            # Out-of-range components must reject, not wrap.
+            "2009-13",
+            "2009-00",
+            "2009-01-32",
+            "2009-Q5",
+            "2009-Q0",
+            "2013-S3",
+            "2013-S0",
+            "2020-W1",
+            "2020-W00",
+            "2020-W54",
+            "2020-W99",
+            # Decimal years would misparse as year-month; they must stay strings.
+            "2009.5",
+        ],
+    )
     def test_unrecognized_codes_return_none(self, code):
         assert _parse_period_code(code) is None

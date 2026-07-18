@@ -79,20 +79,24 @@ def _pivot_observations(records, dim_names, label_maps, time_pos):
     return df.sort_index()
 
 
-_QUARTER_CODE = re.compile(r"^(\d{4})-?Q([1-4])$")
-_SEMESTER_CODE = re.compile(r"^(\d{4})-?S([12])$")
-_WEEK_CODE = re.compile(r"^(\d{4})-?W(\d{2})$")
+_SEMESTER_CODE = re.compile(r"^(\d{4})-?S([12])$", re.IGNORECASE)
+_WEEK_CODE = re.compile(r"^(\d{4})-?W(\d{2})$", re.IGNORECASE)
 
 
-def _parse_period_code(code):
+def _parse_period_code(code) -> datetime | None:
     """Parse an SDMX/JSON-stat period code to its period-start timestamp, or None if unrecognized.
 
-    Handles annual ('2009'), monthly ('2009-01'), daily ('2009-01-15'), quarterly ('2009-Q1'),
-    semester ('2013-S2' -> July 1st), and ISO-week ('2020-W05' -> that week's Monday) codes.
+    Standard codes -- annual ('2009'), monthly ('2009-01'), daily ('2009-01-15'), quarterly
+    ('2009-Q1' or '2009Q1') -- parse through ``pandas.Period``. Semesters ('2013-S2' -> July 1st)
+    and ISO weeks ('2020-W05' -> that week's Monday) have no pandas frequency and parse here. Codes
+    are case-insensitive and must open with a four-digit year; anything unrecognized returns None
+    so the column stays string-typed.
     """
     text = str(code).strip()
-    if match := _QUARTER_CODE.match(text):
-        return datetime(int(match[1]), 3 * int(match[2]) - 2, 1)
+    if len(text) < 4 or not text[:4].isdigit() or "." in text:
+        # The dot guard blocks decimal-year strings like '2009.5', which pandas would otherwise
+        # misread as year-month.
+        return None
     if match := _SEMESTER_CODE.match(text):
         return datetime(int(match[1]), 6 * int(match[2]) - 5, 1)
     if match := _WEEK_CODE.match(text):
@@ -100,12 +104,10 @@ def _parse_period_code(code):
             return datetime.strptime(f"{match[1]}-W{match[2]}-1", "%G-W%V-%u")
         except ValueError:
             return None
-    for fmt in ("%Y", "%Y-%m", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            continue
-    return None
+    try:
+        return pd.Period(text).start_time.to_pydatetime()
+    except ValueError:
+        return None
 
 
 def _observations_to_records(records, dim_names, label_maps, time_pos):
