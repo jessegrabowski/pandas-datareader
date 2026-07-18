@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
     "lxml",
+    "narwhals>=2.0",
     "pandas>=3.0",
     "requests",
 ]
@@ -35,6 +36,19 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+polars = [
+    "polars",
+    "pyarrow",
+]
+pyarrow = [
+    "pyarrow",
+]
+dask = [
+    "dask[dataframe]",
+]
+backends = [
+    "pandas-datareader[polars,pyarrow,dask]",
+]
 dev = [
     "pre-commit",
     "ruff",
@@ -45,6 +59,7 @@ dev = [
     "pytest-xdist",
     "pytest-cov",
     "wrapt",
+    "pandas-datareader[polars]",
 ]
 docs = [
     "sphinx",
