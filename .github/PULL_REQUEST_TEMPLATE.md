@@ -1,5 +1,0 @@
-- [ ] closes #xxxx
-- [ ] tests added / passed
-- [ ] passes `git diff upstream/master -u -- "*.py" | flake8 --diff`
-- [ ] passes `black --check kuznets`
-- [ ] added entry to docs/source/whatsnew/vLATEST.txt
