@@ -34,7 +34,7 @@ Config file
 ===========
 
 For settings that should persist across sessions, create
-``~/.config/kuznets/config.toml`` (or point ``PANDAS_DATAREADER_CONFIG`` at a file of your
+``~/.config/kuznets/config.toml`` (or point ``KUZNETS_CONFIG`` at a file of your
 choosing; ``XDG_CONFIG_HOME`` is honored as well):
 
 .. code-block:: toml

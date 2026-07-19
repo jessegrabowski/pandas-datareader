@@ -59,7 +59,7 @@ _config_cache = _UNLOADED
 def config_path() -> Path:
     """Return the config file path.
 
-    Honor ``PANDAS_DATAREADER_CONFIG`` if set, otherwise fall back to
+    Honor ``KUZNETS_CONFIG`` if set, otherwise fall back to
     ``$XDG_CONFIG_HOME/kuznets/config.toml`` (and ``~/.config`` when ``XDG_CONFIG_HOME``
     is unset).
 
@@ -68,7 +68,7 @@ def config_path() -> Path:
     path : Path
         Location the config file is read from. The file need not exist.
     """
-    override = os.getenv("PANDAS_DATAREADER_CONFIG")
+    override = os.getenv("KUZNETS_CONFIG")
     if override:
         return Path(override).expanduser()
     base = os.getenv("XDG_CONFIG_HOME") or Path.home() / ".config"
