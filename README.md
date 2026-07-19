@@ -3,9 +3,7 @@
 Remote data access for economic and financial data — FRED, OECD, Eurostat, World Bank,
 Fama-French, Yahoo Finance, and more — returned as pandas, polars, pyarrow, or dask frames.
 
-kuznets is a fork of [pydata/pandas-datareader](https://github.com/pydata/pandas-datareader),
-renamed after diverging: readers are dataframe-agnostic, multi-symbol reads fetch concurrently,
-and the test suite runs offline against recorded responses.
+kuznets is a fork of [pydata/pandas-datareader](https://github.com/pydata/pandas-datareader).
 
 [![PyPI](https://img.shields.io/pypi/v/kuznets.svg)](https://pypi.org/project/kuznets/)
 [![Coverage](https://codecov.io/gh/jessegrabowski/kuznets/branch/main/graph/badge.svg)](https://codecov.io/gh/jessegrabowski/kuznets)
